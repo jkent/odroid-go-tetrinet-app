@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "image_cone.h": "c",
+        "freertos.h": "c",
+        "display.h": "c",
+        "spi_master.h": "c",
+        "endian.h": "c",
+        "esp_heap_caps.h": "c"
+    },
+    "python.pythonPath": "/usr/bin/python3"
+}
