@@ -38,7 +38,7 @@ void app_main(void)
     uint16_t keys = 0, changes = 0, pressed = 0;
     do {
         vTaskDelay(10 / portTICK_PERIOD_MS);
-        keys = keypad_debounce(keypad_sample(), &pressed);
+        keys = keypad_debounce(keypad_sample(), &changes);
         pressed = keys & changes;
     } while (!(pressed & KEYPAD_MENU));
 

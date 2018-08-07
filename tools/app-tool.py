@@ -9,12 +9,12 @@ import sys
 
 """
 struct app_header_t {
-    uint32_t magic,
-    uint32_t header_version,
-    uint32_t header_len,
-    uint32_t json_len,
-    uint32_t icon_len,
-    uint32_t binary_len,
+    uint32_t magic;
+    uint32_t header_version;
+    uint32_t header_len;
+    uint32_t json_len;
+    uint32_t icon_len;
+    uint32_t binary_len;
 };
 """
 
