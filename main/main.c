@@ -25,8 +25,10 @@ void app_main(void)
 
     struct tf_t *tf = tf_new(&font_OpenSans_Regular_11X12, 0, TF_ALIGN_CENTER);
 
+    const esp_partition_t *partition = esp_ota_get_running_partition();
+
     char s[32];
-    strcpy(s, "Hello app world!");
+    snprintf(s, sizeof(s), "Hello %s world!", partition->label);
     struct tf_metrics_t m = tf_get_str_metrics(tf, s);
     struct point_t p = {
         .x = DISPLAY_WIDTH/2 - m.width/2,
