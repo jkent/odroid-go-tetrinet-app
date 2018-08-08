@@ -1,0 +1,3 @@
+[submodule "components/hardware"]
+	path = components/hardware
+	url = git@github.com:jkent/odroid-go-hardware-lib.git
