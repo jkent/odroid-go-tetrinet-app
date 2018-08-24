@@ -17,13 +17,22 @@
 #include "OpenSans_Regular_11X12.h"
 
 
+static void helloworld_task(void *arg);
+
 void app_main(void)
 {
     display_init();
     backlight_init();
     keypad_init();
 
-    tf_t *tf = tf_new(&font_OpenSans_Regular_11X12, 0, TF_ALIGN_CENTER);
+    xTaskCreate(helloworld_task, "helloworld", 8192, NULL, 5, NULL);
+}
+
+static void helloworld_task(void *arg)
+{
+    tf_t *tf = tf_new(&font_OpenSans_Regular_11X12, 0xFFFF, 0, TF_ALIGN_CENTER);
+
+    QueueHandle_t keypad = keypad_get_queue();
 
     const esp_partition_t *partition = esp_ota_get_running_partition();
 
@@ -31,18 +40,20 @@ void app_main(void)
     snprintf(s, sizeof(s), "Hello %s world!", partition->label);
     tf_metrics_t m = tf_get_str_metrics(tf, s);
     point_t p = {
-        .x = DISPLAY_WIDTH/2 - m.width/2,
-        .y = DISPLAY_HEIGHT/2 - m.height/2,
+        .x = fb->width/2 - m.width/2,
+        .y = fb->height/2 - m.height/2,
     };
     tf_draw_str(fb, tf, s, p);
     display_update();
 
-    uint16_t keys = 0, changes = 0, pressed = 0;
-    do {
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-        keys = keypad_debounce(keypad_sample(), &changes);
-        pressed = keys & changes;
-    } while (!(pressed & KEYPAD_MENU));
+    keypad_info_t keys;
+    while (true) {
+        if (keypad_queue_receive(keypad, &keys, 50/portTICK_RATE_MS)) {
+            if (keys.pressed & KEYPAD_MENU) {
+                break;
+            }
+        }
+    }
 
     const esp_partition_t *part = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
