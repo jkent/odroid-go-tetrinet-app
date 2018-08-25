@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := hello-world
+PROJECT_NAME := tetrinet
 
 MAKECMDGOALS := launcher_app
 launcher_app: all_binaries
