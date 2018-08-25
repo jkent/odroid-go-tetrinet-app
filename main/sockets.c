@@ -15,6 +15,9 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <string.h>
+
+#include "client.h"
+#include "event.h"
 #include "sockets.h"
 #include "tetrinet.h"
 
@@ -102,6 +105,35 @@ int sockprintf(int s, const char *fmt, ...)
 /*************************************************************************/
 /*************************************************************************/
 
+void conn_task(void *arg)
+{
+    event_t event;
+    fd_set fds;
+    struct timeval tv;
+
+    while (sock >= 0) {
+        FD_ZERO(&fds);
+        FD_SET(sock, &fds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 10 * 1000;
+        while (select(sock + 1, &fds, NULL, NULL, &tv) < 0) {
+            if (errno != EINTR) {
+                return;
+            }
+        }
+        if (FD_ISSET(sock, &fds)) {
+            event.type = EVENT_TYPE_SOCKET;
+            event.socket.eof = false;
+            if (!sgets(event.socket.buf, sizeof(event.socket.buf), sock)) {
+                event.socket.eof = true;
+            }
+            xQueueSend(event_queue, &event, portMAX_DELAY);
+        }
+    }
+}
+
+/*************************************************************************/
+
 int conn(const char *host, int port, char ipbuf[4])
 {
 #ifdef HAVE_IPV6
@@ -160,10 +192,13 @@ int conn(const char *host, int port, char ipbuf[4])
     if (connect(sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
         int errno_save = errno;
         close(sock);
+        sock = -1;
         errno = errno_save;
         return -1;
     }
 #endif
+
+    xTaskCreate(conn_task, "conn", 3072, NULL, 5, NULL);
 
     return sock;
 }

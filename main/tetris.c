@@ -5,13 +5,17 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
-#include "tetrinet.h"
+
 #include "client.h"
-#include "tetris.h"
+#include "event.h"
 #include "io.h"
+#include "keypad.h"
+#include "tetrinet.h"
+#include "tetris.h"
 #include "sockets.h"
 
 /*************************************************************************/
@@ -728,94 +732,6 @@ void do_special(const char *type, int from, int to)
 /*************************************************************************/
 /*************************************************************************/
 
-/* Deal with the in-game message input buffer. */
-
-static char gmsg_buffer[512];
-static int gmsg_pos;
-
-#define curpos	(gmsg_buffer+gmsg_pos)
-
-/*************************************************************************/
-
-static void gmsg_input(int c)
-{
-    if (gmsg_pos < sizeof(gmsg_buffer) - 1) {
-        memmove(curpos + 1, curpos, strlen(curpos) + 1);
-        gmsg_buffer[gmsg_pos++] = c;
-        io->draw_gmsg_input(gmsg_buffer, gmsg_pos);
-    }
-}
-
-/*************************************************************************/
-
-static void gmsg_delete(void)
-{
-    if (gmsg_buffer[gmsg_pos]) {
-        memmove(curpos, curpos + 1, strlen(curpos) - 1 + 1);
-        io->draw_gmsg_input(gmsg_buffer, gmsg_pos);
-    }
-}
-
-/*************************************************************************/
-
-static void gmsg_backspace(void)
-{
-    if (gmsg_pos > 0) {
-        gmsg_pos--;
-        gmsg_delete();
-    }
-}
-
-/*************************************************************************/
-
-static void gmsg_kill(void)
-{
-    gmsg_pos = 0;
-    *gmsg_buffer = 0;
-    io->draw_gmsg_input(gmsg_buffer, gmsg_pos);
-}
-
-/*************************************************************************/
-
-static void gmsg_move(int how)
-{
-    if (how == -2) {
-        gmsg_pos = 0;
-        io->draw_gmsg_input(gmsg_buffer, gmsg_pos);
-    } else if (how == -1 && gmsg_pos > 0) {
-        gmsg_pos--;
-        io->draw_gmsg_input(gmsg_buffer, gmsg_pos);
-    } else if (how == 1 && gmsg_buffer[gmsg_pos]) {
-        gmsg_pos++;
-        io->draw_gmsg_input(gmsg_buffer, gmsg_pos);
-    } else if (how == 2) {
-        gmsg_pos = strlen(gmsg_buffer);
-        io->draw_gmsg_input(gmsg_buffer, gmsg_pos);
-    }
-}
-
-/*************************************************************************/
-
-static void gmsg_enter(void)
-{
-    if (*gmsg_buffer) {
-        if (strncasecmp(gmsg_buffer, "/me ", 4) == 0)
-            sockprintf(sock, "gmsg * %s %s", players[my_playernum - 1],
-                       gmsg_buffer + 4);
-        else
-            sockprintf(sock, "gmsg <%s> %s", players[my_playernum - 1],
-                       gmsg_buffer);
-        gmsg_pos = 0;
-        *gmsg_buffer = 0;
-        io->clear_gmsg_input();
-    }
-}
-
-#undef curpos
-
-/*************************************************************************/
-/*************************************************************************/
-
 /* Set up for a new game. */
 
 void new_game(void)
@@ -864,59 +780,28 @@ void tetris_timeout_action(void)
 
 /*************************************************************************/
 
-/* Do something with a character of input. */
+/* Do something with a keypad event. */
 
 static const char special_chars[] = "acnrsbgqo";
 
-void tetris_input(int c)
+void tetris_input(keypad_event_t *keypad)
 {
     PieceData *pd = &piecedata[current_piece][current_rotation];
     int x = current_x - pd->hot_x;
     int y = current_y - pd->hot_y;
     int rnew, ynew;
-    static int gmsg_active = 0;
 
-    if (gmsg_active) {
-        if (c == 8 || c == 127) /* Backspace or Delete */
-            gmsg_backspace();
-        else if (c == 4)        /* Ctrl-D */
-            gmsg_delete();
-        else if (c == 21)       /* Ctrl-U */
-            gmsg_kill();
-        else if (c == K_LEFT)
-            gmsg_move(-1);
-        else if (c == K_RIGHT)
-            gmsg_move(1);
-        else if (c == 1)        /* Ctrl-A */
-            gmsg_move(-2);
-        else if (c == 5)        /* Ctrl-E */
-            gmsg_move(2);
-        else if (c == '\r' || c == '\n') {
-            gmsg_enter();
-            gmsg_active = 0;
-        } else if (c == 27) {   /* Escape */
-            io->clear_gmsg_input();
-            gmsg_active = 0;
-        } else if (c >= 1 && c <= 0xFF)
-            gmsg_input(c);
-        return;
-    }
-
-    if (c != 't' && (!playing || paused))
-        return;
-
-    switch (c) {
-    case K_UP:                 /* Rotate clockwise */
-    case 'x':
+    /* Rotate clockwise */
+    if (keypad->pressed & KEYPAD_UP) {
         if (piece_waiting)
-            break;
+            goto up_out;
         rnew = (current_rotation + 1) % 4;
         pd = &piecedata[current_piece][current_rotation];
         x = current_x - pd->hot_x;
         y = current_y - pd->hot_y;
         if (x + pd->left < 0 || x + pd->right >= FIELD_WIDTH
             || y + pd->bottom >= FIELD_HEIGHT)
-            break;
+            goto up_out;
         draw_piece(0);
         if (!piece_overlaps(-1, -1, rnew)) {
             current_rotation = rnew;
@@ -925,18 +810,20 @@ void tetris_input(int c)
         } else {
             draw_piece(1);
         }
-        break;
+    }
+up_out:
 
-    case 'z':                  /* Rotate counterclockwise */
+    /* Rotate counterclockwise */
+    if (keypad->pressed & KEYPAD_B) {
         if (piece_waiting)
-            break;
+            goto b_out;
         rnew = (current_rotation + 3) % 4;
         pd = &piecedata[current_piece][current_rotation];
         x = current_x - pd->hot_x;
         y = current_y - pd->hot_y;
         if (x + pd->left < 0 || x + pd->right >= FIELD_WIDTH
             || y + pd->bottom >= FIELD_HEIGHT)
-            break;
+            goto b_out;
         draw_piece(0);
         if (!piece_overlaps(-1, -1, rnew)) {
             current_rotation = rnew;
@@ -945,11 +832,13 @@ void tetris_input(int c)
         } else {
             draw_piece(1);
         }
-        break;
+    }
+b_out:
 
-    case K_LEFT:               /* Move left */
+    /* Move left */
+    if (keypad->pressed & KEYPAD_LEFT) { 
         if (piece_waiting)
-            break;
+            goto left_out;
         if (x + pd->left > 0) {
             draw_piece(0);
             if (!piece_overlaps(current_x - 1, -1, -1)) {
@@ -960,11 +849,13 @@ void tetris_input(int c)
                 draw_piece(1);
             }
         }
-        break;
+    }
+left_out:
 
-    case K_RIGHT:              /* Move right */
+    /* Move right */
+    if (keypad->pressed & KEYPAD_RIGHT) {
         if (piece_waiting)
-            break;
+            goto right_out;
         if (x + pd->right < FIELD_WIDTH - 1) {
             draw_piece(0);
             if (!piece_overlaps(current_x + 1, -1, -1)) {
@@ -975,17 +866,21 @@ void tetris_input(int c)
                 draw_piece(1);
             }
         }
-        break;
+    }
+right_out:
 
-    case K_DOWN:               /* Down one space */
+    /* Down one space */
+    if (keypad->pressed & KEYPAD_DOWN) {
         if (piece_waiting)
-            break;
+            goto down_out;
         step_down();
-        break;
+    }
+down_out:
 
-    case ' ':                  /* Down until the piece hits something */
+    /* Down until the piece hits something */
+    if (keypad->pressed & KEYPAD_A) {
         if (piece_waiting)
-            break;
+            goto a_out;
         draw_piece(0);
         ynew = current_y + 1;
         while (y + pd->bottom < FIELD_HEIGHT && !piece_overlaps(-1, ynew, -1)) {
@@ -1001,8 +896,11 @@ void tetris_input(int c)
         } else {
             draw_piece(1);
         }
-        break;
+    }
+a_out:
+    return;
 
+#if 0
     case 'd':
         if (specials[0] == -1)
             break;
@@ -1036,13 +934,7 @@ void tetris_input(int c)
             io->draw_specials();
             break;
         }
-
-    case 't':
-        gmsg_active = 1;
-        io->draw_gmsg_input(gmsg_buffer, gmsg_pos);
-        break;
-
-    }                           /* switch (c) */
+#endif
 }
 
 /*************************************************************************/

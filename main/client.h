@@ -13,17 +13,6 @@
 
 /*************************************************************************/
 
-/* Overall display modes */
-
-#define MODE_FIELDS	0
-#define MODE_PARTYLINE	1
-#define MODE_WINLIST	2
-#define MODE_SETTINGS	3
-#define MODE_CLIENT	4	/* Client settings */
-#define MODE_SERVER	5	/* Server settings */
-
-/*************************************************************************/
-
 /* Key definitions for input.  We use K_* to avoid conflict with ncurses */
 
 #define K_UP		0x100

@@ -15,19 +15,21 @@
 #include "wifi.h"
 
 #include "client.h"
+#include "event.h"
 #include "graphics.h"
 #include "tf.h"
 #include "OpenSans_Regular_11X12.h"
 #include "server.h"
 
 
-static void helloworld_task(void *arg);
+static void tetrinet_task(void *arg);
 
 void app_main(void)
 {
     display_init();
     backlight_init();
     keypad_init();
+    event_init();
 
     esp_vfs_spiffs_conf_t conf = {
       .base_path = "/spiffs",
@@ -41,17 +43,15 @@ void app_main(void)
     wifi_init();
     wifi_enable();
 
-    xTaskCreate(helloworld_task, "helloworld", 8192, NULL, 5, NULL);
+    xTaskCreate(tetrinet_task, "tetrinet", 8192, NULL, 5, NULL);
     xTaskCreate(server_main, "server", 8192, NULL, 5, NULL);
 }
 
-static void helloworld_task(void *arg)
+static void tetrinet_task(void *arg)
 {
+    event_t event;
     tf_t *tf = tf_new(&font_OpenSans_Regular_11X12, 0xFFFF, 0, TF_ALIGN_CENTER);
 
-    QueueHandle_t keypad = keypad_get_queue();
-
-    keypad_info_t keys;
     while (true) {
         char s[64];
         ip4_addr_t ip = wifi_get_ip();
@@ -74,14 +74,20 @@ static void helloworld_task(void *arg)
 
         display_update();
 
-        if (keypad_queue_receive(keypad, &keys, 250/portTICK_RATE_MS)) {
-            if (keys.pressed & KEYPAD_MENU) {
-                break;
-            }
-            if (keys.pressed & KEYPAD_START) {
-                client_main(NULL);
-            }
+        if (!xQueueReceive(event_queue, &event, 100/portTICK_PERIOD_MS)) {
+            continue;
+        }
 
+        if (event.type != EVENT_TYPE_KEYPAD) {
+            continue;
+        }
+
+        if (event.keypad.pressed & KEYPAD_START) {
+            client_main(NULL);
+        }
+
+        if (event.keypad.pressed & KEYPAD_MENU) {
+            break;
         }
     }
 

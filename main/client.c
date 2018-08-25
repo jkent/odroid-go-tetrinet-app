@@ -11,8 +11,13 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
-#include "tetrinet.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
 #include "client.h"
+#include "event.h"
+#include "tetrinet.h"
 #include "io.h"
 #include "server.h"
 #include "sockets.h"
@@ -29,7 +34,6 @@ int my_playernum = -1;          /* What player number are we? */
 char *my_nick;                  /* And what is our nick? */
 static WinInfo winlist[MAXWINLIST]; /* Winners' list from server */
 int sock;                       /* Socket for server communication */
-static int dispmode;            /* Current display mode */
 char *players[6];               /* Player names (NULL for no such player) */
 char *teams[6];                 /* Team names (NULL for not on a team) */
 int playing;                    /* Are we currently playing a game? */
@@ -88,8 +92,6 @@ void parse(char *buf)
         }
         if (i < MAXWINLIST)
             winlist[i].name[0] = 0;
-        if (dispmode == MODE_WINLIST)
-            io->setup_winlist();
 
     } else if (strcmp(cmd, tetrifast ? ")#)(!@(*3" : "playernum") == 0) {
         if ((s = strtok_r(NULL, " ", &sp)))
@@ -116,8 +118,7 @@ void parse(char *buf)
         }
         snprintf(buf, sizeof(buf), "*** %s is Now Playing", t);
         io->draw_text(BUFFER_PLINE, buf);
-        if (dispmode == MODE_FIELDS)
-            io->setup_fields();
+        io->setup_fields();
 
     } else if (strcmp(cmd, "playerleave") == 0) {
         int player;
@@ -133,8 +134,7 @@ void parse(char *buf)
         io->draw_text(BUFFER_PLINE, buf);
         free(players[player]);
         players[player] = NULL;
-        if (dispmode == MODE_FIELDS)
-            io->setup_fields();
+        io->setup_fields();
 
     } else if (strcmp(cmd, "team") == 0) {
         int player;
@@ -292,13 +292,10 @@ void parse(char *buf)
         specials[0] = -1;
         io->clear_text(BUFFER_ATTDEF);
         io->draw_text(BUFFER_PLINE, "*** The Game Has Ended");
-        if (dispmode == MODE_FIELDS) {
-            int i;
-            io->draw_own_field();
-            for (i = 1; i <= 6; i++) {
-                if (i != my_playernum)
-                    io->draw_other_field(i);
-            }
+        io->draw_own_field();
+        for (int i = 1; i <= 6; i++) {
+            if (i != my_playernum)
+                io->draw_other_field(i);
         }
 
     } else if (strcmp(cmd, "playerwon") == 0) {
@@ -412,147 +409,6 @@ void parse(char *buf)
 /*************************************************************************/
 /*************************************************************************/
 
-static char partyline_buffer[512];
-static int partyline_pos = 0;
-
-#define curpos	(partyline_buffer+partyline_pos)
-
-/*************************************************************************/
-
-/* Add a character to the partyline buffer. */
-
-void partyline_input(int c)
-{
-    if (partyline_pos < sizeof(partyline_buffer) - 1) {
-        memmove(curpos + 1, curpos, strlen(curpos) + 1);
-        partyline_buffer[partyline_pos++] = c;
-        io->draw_partyline_input(partyline_buffer, partyline_pos);
-    }
-}
-
-/*************************************************************************/
-
-/* Delete the current character from the partyline buffer. */
-
-void partyline_delete(void)
-{
-    if (partyline_buffer[partyline_pos]) {
-        memmove(curpos, curpos + 1, strlen(curpos) - 1 + 1);
-        io->draw_partyline_input(partyline_buffer, partyline_pos);
-    }
-}
-
-/*************************************************************************/
-
-/* Backspace a character from the partyline buffer. */
-
-void partyline_backspace(void)
-{
-    if (partyline_pos > 0) {
-        partyline_pos--;
-        partyline_delete();
-    }
-}
-
-/*************************************************************************/
-
-/* Kill the entire partyline input buffer. */
-
-void partyline_kill(void)
-{
-    partyline_pos = 0;
-    *partyline_buffer = 0;
-    io->draw_partyline_input(partyline_buffer, partyline_pos);
-}
-
-/*************************************************************************/
-
-/* Move around the input buffer.  Sign indicates direction; absolute value
- * of 1 means one character, 2 means the whole line.
- */
-
-void partyline_move(int how)
-{
-    if (how == -2) {
-        partyline_pos = 0;
-        io->draw_partyline_input(partyline_buffer, partyline_pos);
-    } else if (how == -1 && partyline_pos > 0) {
-        partyline_pos--;
-        io->draw_partyline_input(partyline_buffer, partyline_pos);
-    } else if (how == 1 && partyline_buffer[partyline_pos]) {
-        partyline_pos++;
-        io->draw_partyline_input(partyline_buffer, partyline_pos);
-    } else if (how == 2) {
-        partyline_pos = strlen(partyline_buffer);
-        io->draw_partyline_input(partyline_buffer, partyline_pos);
-    }
-}
-
-/*************************************************************************/
-
-/* Send the input line to the server. */
-
-void partyline_enter(void)
-{
-    char buf[1024];
-
-    if (*partyline_buffer) {
-        if (strncasecmp(partyline_buffer, "/me ", 4) == 0) {
-            sockprintf(sock, "plineact %d %s", my_playernum,
-                       partyline_buffer + 4);
-            snprintf(buf, sizeof(buf), "* %s %s", players[my_playernum - 1],
-                     partyline_buffer + 4);
-            io->draw_text(BUFFER_PLINE, buf);
-        } else if (strcasecmp(partyline_buffer, "/start") == 0) {
-            sockprintf(sock, "startgame 1 %d", my_playernum);
-        } else if (strcasecmp(partyline_buffer, "/end") == 0) {
-            sockprintf(sock, "startgame 0 %d", my_playernum);
-        } else if (strcasecmp(partyline_buffer, "/pause") == 0) {
-            sockprintf(sock, "pause 1 %d", my_playernum);
-        } else if (strcasecmp(partyline_buffer, "/unpause") == 0) {
-            sockprintf(sock, "pause 0 %d", my_playernum);
-        } else if (strncasecmp(partyline_buffer, "/team", 5) == 0) {
-            if (strlen(partyline_buffer) == 5)
-                strcpy(partyline_buffer + 5, " ");      /* make it "/team " */
-            sockprintf(sock, "team %d %s", my_playernum,
-                       partyline_buffer + 6);
-            if (partyline_buffer[6]) {
-                if (teams[my_playernum - 1])
-                    free(teams[my_playernum - 1]);
-                teams[my_playernum - 1] = strdup(partyline_buffer + 6);
-                snprintf(buf, sizeof(buf), "*** %s is Now on Team %s",
-                         players[my_playernum - 1], partyline_buffer + 6);
-                io->draw_text(BUFFER_PLINE, buf);
-            } else {
-                if (teams[my_playernum - 1])
-                    free(teams[my_playernum - 1]);
-                teams[my_playernum - 1] = NULL;
-                snprintf(buf, sizeof(buf), "*** %s is Now Alone",
-                         players[my_playernum - 1]);
-                io->draw_text(BUFFER_PLINE, buf);
-            }
-        } else {
-            sockprintf(sock, "pline %d %s", my_playernum,
-                       partyline_buffer);
-            if (*partyline_buffer != '/' || partyline_buffer[1] == 0
-                || partyline_buffer[1] == ' ') {
-                /* We do not show server-side commands. */
-                snprintf(buf, sizeof(buf), "<%s> %s", players[my_playernum - 1],
-                         partyline_buffer);
-                io->draw_text(BUFFER_PLINE, buf);
-            }
-        }
-        partyline_pos = 0;
-        *partyline_buffer = 0;
-        io->draw_partyline_input(partyline_buffer, partyline_pos);
-    }
-}
-
-#undef curpos
-
-/*************************************************************************/
-/*************************************************************************/
-
 void help()
 {
     fprintf(stderr,
@@ -575,7 +431,7 @@ void help()
             "               possible. Implies -noslide and -noshadow.\n");
 }
 
-int init(int ac, char **av)
+int init(int ac, char **av, event_t *event)
 {
     int i;
     char *nick = NULL, *server = NULL;
@@ -649,19 +505,24 @@ int init(int ac, char **av)
     sputs(nickmsg, sock);
 
     do {
-        if (!sgets(buf, sizeof(buf), sock)) {
+        xQueueReceive(event_queue, event, portMAX_DELAY);
+        if (event->type != EVENT_TYPE_SOCKET) {
+            continue;
+        }
+        
+        if (event->socket.eof) {
             fprintf(stderr, "Server %s closed connection\n", server);
             disconn(sock);
+            sock = -1;
             return 1;
         }
-        parse(buf);
+        parse(event->socket.buf);
     } while (my_playernum < 0);
     sockprintf(sock, "team %d ", my_playernum);
 
     players[my_playernum - 1] = strdup(nick);
-    dispmode = MODE_PARTYLINE;
     io->screen_setup();
-    io->setup_partyline();
+    io->setup_fields();
 
     return 0;
 }
@@ -670,76 +531,36 @@ int init(int ac, char **av)
 
 void client_main(void *arg)
 {
-    int i;
+    event_t event;
 
     char *argv[] = {
-        "", "Jeff", "127.0.0.1"
+        "", "ODROID-GO", "127.0.0.1"
     };
 
-    if (init(3, argv) != 0)
+    if (init(3, argv, &event) != 0)
         return;
 
     for (;;) {
-        int timeout;
+        TickType_t timeout;
         if (playing && !paused)
-            timeout = tetris_timeout();
+            timeout = tetris_timeout() / portTICK_PERIOD_MS;
         else
-            timeout = -1;
-        i = io->wait_for_input(timeout);
-        if (i == -1) {
-            char buf[1024];
-            if (sgets(buf, sizeof(buf), sock))
-                parse(buf);
-            else {
+            timeout = portMAX_DELAY;
+        if (!xQueueReceive(event_queue, &event, timeout)) {
+            tetris_timeout_action();
+        } else if (event.type == EVENT_TYPE_KEYPAD) {
+            tetris_input(&event.keypad);
+        } else if (event.type == EVENT_TYPE_SOCKET) {
+            if (event.socket.eof) {
                 io->draw_text(BUFFER_PLINE, "*** Disconnected from Server");
                 break;
             }
-        } else if (i == -2) {
-            tetris_timeout_action();
-        } else if (i == 12) {   /* Ctrl-L */
-            io->screen_redraw();
-        } else if (i == K_F10) {
-            break;              /* out of main loop */
-        } else if (i == K_F1) {
-            if (dispmode != MODE_FIELDS) {
-                dispmode = MODE_FIELDS;
-                io->setup_fields();
-            }
-        } else if (i == K_F2) {
-            if (dispmode != MODE_PARTYLINE) {
-                dispmode = MODE_PARTYLINE;
-                io->setup_partyline();
-            }
-        } else if (i == K_F3) {
-            if (dispmode != MODE_WINLIST) {
-                dispmode = MODE_WINLIST;
-                io->setup_winlist();
-            }
-        } else if (dispmode == MODE_FIELDS) {
-            tetris_input(i);
-        } else if (dispmode == MODE_PARTYLINE) {
-            if (i == 8 || i == 127)     /* Backspace or Delete */
-                partyline_backspace();
-            else if (i == 4)    /* Ctrl-D */
-                partyline_delete();
-            else if (i == 21)   /* Ctrl-U */
-                partyline_kill();
-            else if (i == '\r' || i == '\n')
-                partyline_enter();
-            else if (i == K_LEFT)
-                partyline_move(-1);
-            else if (i == K_RIGHT)
-                partyline_move(1);
-            else if (i == 1)    /* Ctrl-A */
-                partyline_move(-2);
-            else if (i == 5)    /* Ctrl-E */
-                partyline_move(2);
-            else if (i >= 1 && i <= 0xFF)
-                partyline_input(i);
+            parse(event.socket.buf);
         }
     }
 
     disconn(sock);
+    sock = -1;
     return;
 }
 

@@ -7,6 +7,8 @@
 #ifndef TETRIS_H
 #define TETRIS_H
 
+#include "event.h"
+
 /*************************************************************************/
 
 #define PIECE_BAR	0	/* Straight bar */
@@ -66,7 +68,7 @@ extern void do_special(const char *type, int from, int to);
 
 extern int tetris_timeout(void);
 extern void tetris_timeout_action(void);
-extern void tetris_input(int c);
+extern void tetris_input(keypad_event_t *keypad);
 
 /*************************************************************************/
 
