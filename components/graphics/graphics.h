@@ -5,7 +5,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <machine/endian.h>
 
 #include "gbuf.h"
 #include "point.h"

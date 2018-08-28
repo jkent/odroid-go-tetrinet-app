@@ -791,6 +791,21 @@ void tetris_input(keypad_event_t *keypad)
     int y = current_y - pd->hot_y;
     int rnew, ynew;
 
+    if (!playing || paused) {
+        if (keypad->pressed & KEYPAD_START) {
+            if (!playing) {
+                sockprintf(sock, "startgame 1 %d", my_playernum);
+            } else if (paused) {
+                sockprintf(sock, "pause 0 %d", my_playernum);
+            }
+        }
+        return;
+    }
+
+    if (keypad->pressed & KEYPAD_START) {
+        sockprintf(sock, "pause 1 %d", my_playernum);
+    }
+
     /* Rotate clockwise */
     if (keypad->pressed & KEYPAD_UP) {
         if (piece_waiting)
@@ -814,7 +829,7 @@ void tetris_input(keypad_event_t *keypad)
 up_out:
 
     /* Rotate counterclockwise */
-    if (keypad->pressed & KEYPAD_B) {
+    if (keypad->pressed & KEYPAD_A) {
         if (piece_waiting)
             goto b_out;
         rnew = (current_rotation + 3) % 4;
@@ -833,7 +848,7 @@ up_out:
             draw_piece(1);
         }
     }
-b_out:
+a_out:
 
     /* Move left */
     if (keypad->pressed & KEYPAD_LEFT) { 
@@ -878,7 +893,7 @@ right_out:
 down_out:
 
     /* Down until the piece hits something */
-    if (keypad->pressed & KEYPAD_A) {
+    if (keypad->pressed & KEYPAD_B) {
         if (piece_waiting)
             goto a_out;
         draw_piece(0);
@@ -897,7 +912,7 @@ down_out:
             draw_piece(1);
         }
     }
-a_out:
+b_out:
     return;
 
 #if 0
